@@ -1,0 +1,202 @@
+const User = require('../models/User');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+
+const generateToken = (id, role, name, email) => {
+    return jwt.sign({ id, role, name, email }, process.env.JWT_SECRET || 'fallback_secret', {
+        expiresIn: '30d',
+    });
+};
+
+// @desc    Register user
+// @route   POST /api/auth/register
+// @access  Public
+exports.register = async (req, res) => {
+    try {
+        const { name, email, password, role } = req.body;
+
+        let user = await User.findOne({ email });
+        if (user) {
+            return res.status(400).json({ msg: 'User already exists' });
+        }
+
+        // Hash password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // Verification token (simulated for now)
+        const verificationToken = Math.random().toString(36).substring(2, 15);
+
+        user = await User.create({
+            name,
+            email,
+            password: hashedPassword,
+            role: role || 'User',
+            verificationToken
+        });
+
+        // In a real app, send email here using nodemailer
+        console.log(`Email verification link: http://localhost:5173/verify-email/${verificationToken}`);
+
+        const token = generateToken(user._id, user.role, user.name, user.email);
+
+        res.status(201).json({
+            success: true,
+            token,
+            user: { _id: user._id, name: user.name, email: user.email, role: user.role }
+        });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ msg: 'Server Error' });
+    }
+};
+
+// @desc    Login user
+// @route   POST /api/auth/login
+// @access  Public
+exports.login = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ msg: 'Please provide an email and password' });
+        }
+
+        // Check for user (include invisible password field)
+        const user = await User.findOne({ email }).select('+password');
+        if (!user) {
+            return res.status(401).json({ msg: 'Invalid credentials' });
+        }
+
+        // Check if password matches
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(401).json({ msg: 'Invalid credentials' });
+        }
+
+        // Check if status is suspended
+        if (user.status === 'Suspended') {
+            return res.status(403).json({ msg: 'Account suspended. Contact support.' });
+        }
+
+        const token = generateToken(user._id, user.role, user.name, user.email);
+
+        res.json({
+            success: true,
+            token,
+            user: { _id: user._id, name: user.name, email: user.email, role: user.role }
+        });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ msg: 'Server Error' });
+    }
+};
+
+// @desc    Get current logged in user
+// @route   GET /api/auth/me
+// @access  Private
+exports.getMe = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        res.json({
+            success: true,
+            data: user
+        });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ msg: 'Server Error' });
+    }
+};
+
+// @desc    Verify Email
+// @route   GET /api/auth/verify/:token
+// @access  Public
+exports.verifyEmail = async (req, res) => {
+    try {
+        const user = await User.findOne({ verificationToken: req.params.token });
+
+        if (!user) {
+            return res.status(400).json({ msg: 'Invalid verification token' });
+        }
+
+        user.isEmailVerified = true;
+        user.verificationToken = undefined;
+        await user.save();
+
+        res.json({ success: true, msg: 'Email verified successfully' });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ msg: 'Server Error' });
+    }
+};
+
+// @desc    Forgot Password
+// @route   POST /api/auth/forgotpassword
+// @access  Public
+exports.forgotPassword = async (req, res) => {
+    try {
+        const { email } = req.body;
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({ msg: 'There is no user with that email' });
+        }
+
+        // Get reset token
+        const resetToken = crypto.randomBytes(20).toString('hex');
+
+        // Set reset password fields
+        user.resetPasswordToken = crypto
+            .createHash('sha256')
+            .update(resetToken)
+            .digest('hex');
+
+        user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+        await user.save();
+
+        // In a real app, send email here
+        console.log(`Password reset link: http://localhost:5173/resetpassword/${resetToken}`);
+
+        res.json({ success: true, msg: 'Password reset link sent to your email (check console logs for link)' });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ msg: 'Server Error' });
+    }
+};
+
+// @desc    Reset Password
+// @route   PUT /api/auth/resetpassword/:token
+// @access  Public
+exports.resetPassword = async (req, res) => {
+    try {
+        // Get hashed token
+        const resetPasswordToken = crypto
+            .createHash('sha256')
+            .update(req.params.token)
+            .digest('hex');
+
+        const user = await User.findOne({
+            resetPasswordToken,
+            resetPasswordExpire: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({ msg: 'Invalid or expired reset token' });
+        }
+
+        // Set new password
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(req.body.password, salt);
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
+
+        await user.save();
+
+        res.json({ success: true, msg: 'Password updated successfully' });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ msg: 'Server Error' });
+    }
+};

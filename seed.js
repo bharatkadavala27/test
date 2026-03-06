@@ -1,0 +1,135 @@
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+const Category = require('./models/Category');
+const Company = require('./models/Company');
+const User = require('./models/User');
+
+const MONGO_URI = 'mongodb://127.0.0.1:27017/justdial';
+
+const categories = [
+    { name: 'Restaurants', slug: 'restaurants', status: 'Active', subCount: 12 },
+    { name: 'Hotels', slug: 'hotels', status: 'Active', subCount: 8 },
+    { name: 'Hospitals', slug: 'hospitals', status: 'Active', subCount: 15 },
+    { name: 'Education', slug: 'education', status: 'Active', subCount: 20 },
+    { name: 'Real Estate', slug: 'real-estate', status: 'Active', subCount: 10 },
+    { name: 'Salons & Spa', slug: 'salons-spa', status: 'Active', subCount: 7 },
+    { name: 'Electronics', slug: 'electronics', status: 'Active', subCount: 18 },
+    { name: 'Fitness', slug: 'fitness', status: 'Active', subCount: 5 },
+    { name: 'Travel', slug: 'travel', status: 'Inactive', subCount: 3 },
+    { name: 'Automobile', slug: 'automobile', status: 'Active', subCount: 9 },
+];
+
+const users = [
+    { name: 'Super Admin', email: 'admin@gmail.com', role: 'Super Admin', status: 'Active', companiesOwned: 0 },
+    { name: 'Rahul Sharma', email: 'rahul@example.com', role: 'Company Owner', status: 'Active', companiesOwned: 3 },
+    { name: 'Priya Patel', email: 'priya@example.com', role: 'Company Owner', status: 'Active', companiesOwned: 2 },
+    { name: 'Amit Verma', email: 'amit@example.com', role: 'User', status: 'Active', companiesOwned: 0 },
+    { name: 'Sneha Gupta', email: 'sneha@example.com', role: 'User', status: 'Active', companiesOwned: 0 },
+    { name: 'Vijay Mehta', email: 'vijay@example.com', role: 'Company Owner', status: 'Suspended', companiesOwned: 1 },
+];
+
+const companies = [
+    { 
+        name: 'Taj Hotel Mumbai', 
+        category: 'Hotels', 
+        location: 'Mumbai, Maharashtra', 
+        description: 'Luxury 5-star hotel in the heart of Mumbai', 
+        status: 'Active', 
+        claimed: true, 
+        verified: true,
+        logo: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=200&h=200&fit=crop',
+        image: 'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=800&h=400&fit=crop'
+    },
+    { 
+        name: 'Pizza Palace', 
+        category: 'Restaurants', 
+        location: 'Delhi, NCR', 
+        description: 'Best pizza in town with 20+ varieties', 
+        status: 'Active', 
+        claimed: true, 
+        verified: false,
+        logo: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=200&h=200&fit=crop',
+        image: 'https://images.unsplash.com/photo-1574126154517-d1e0d89ef734?w=800&h=400&fit=crop'
+    },
+    { 
+        name: 'Apollo Hospital', 
+        category: 'Hospitals', 
+        location: 'Bangalore, Karnataka', 
+        description: 'Multi-specialty hospital with 24/7 emergency', 
+        status: 'Active', 
+        claimed: true, 
+        verified: true,
+        logo: 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=200&h=200&fit=crop',
+        image: 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=800&h=400&fit=crop'
+    },
+    { 
+        name: 'DLF Cyber City', 
+        category: 'Real Estate', 
+        location: 'Gurugram, Haryana', 
+        description: 'Premium commercial office space', 
+        status: 'Active', 
+        claimed: false, 
+        verified: false,
+        logo: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=200&h=200&fit=crop',
+        image: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800&h=400&fit=crop'
+    },
+    { 
+        name: 'Lakme Salon', 
+        category: 'Salons & Spa', 
+        location: 'Pune, Maharashtra', 
+        description: 'Professional beauty salon and spa services', 
+        status: 'Active', 
+        claimed: true, 
+        verified: true,
+        logo: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=200&h=200&fit=crop',
+        image: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=800&h=400&fit=crop'
+    },
+    { 
+        name: 'Sony Electronics', 
+        category: 'Electronics', 
+        location: 'Chennai, Tamil Nadu', 
+        description: 'Authorized Sony showroom for all electronics', 
+        status: 'Active', 
+        claimed: true, 
+        verified: true,
+        logo: 'https://images.unsplash.com/photo-1491933382434-500287f9b54b?w=200&h=200&fit=crop',
+        image: 'https://images.unsplash.com/photo-1491933382434-500287f9b54b?w=800&h=400&fit=crop'
+    }
+];
+
+async function seed() {
+    try {
+        await mongoose.connect(MONGO_URI);
+        console.log('✅ Connected to local MongoDB');
+
+        // Clear existing data (but keep categories)
+        await Company.deleteMany({});
+        await User.deleteMany({});
+        console.log('🗑️  Cleared existing data (Users & Companies)');
+
+        // Insert new data
+        const salt = await bcrypt.genSalt(10);
+        const defaultPassword = await bcrypt.hash('password123', salt);
+        const adminPassword = await bcrypt.hash('admin@123', salt);
+
+        const usersWithPasswords = users.map(u => ({
+            ...u,
+            password: u.email === 'admin@gmail.com' ? adminPassword : defaultPassword
+        }));
+
+        await User.insertMany(usersWithPasswords);
+        console.log(`✅ Seeded ${users.length} users`);
+
+        await Company.insertMany(companies);
+        console.log(`✅ Seeded ${companies.length} companies`);
+
+        console.log('\n🎉 Database seeded successfully!');
+        process.exit(0);
+    } catch (err) {
+        console.error('❌ Seeding failed:', err.message);
+        process.exit(1);
+    }
+}
+
+seed();
+
